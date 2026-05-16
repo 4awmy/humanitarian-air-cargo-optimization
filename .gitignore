@@ -127,3 +127,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Maestro state
+docs/
+
+# Original project files
+message.txt
+message (1).txt
+humanitarian_air_cargo_optimization.pdf
