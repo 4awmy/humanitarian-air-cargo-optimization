@@ -1,0 +1,208 @@
+import streamlit as st
+from pulp import LpProblem, LpMaximize, LpVariable, lpSum, PULP_CBC_CMD, LpStatus, value
+
+# Data definitions
+items = ["A", "B", "C", "D", "E", "F", "G", "H"]
+
+utility = {
+    "A": 60,
+    "B": 80,
+    "C": 90,
+    "D": 75,
+    "E": 30,
+    "F": 75,
+    "G": 60,
+    "H": 30,
+}
+
+weight = {
+    "A": 10,
+    "B": 20,
+    "C": 30,
+    "D": 15,
+    "E": 5,
+    "F": 18,
+    "G": 12,
+    "H": 8,
+}
+
+volume = {
+    "A": 2,
+    "B": 3,
+    "C": 4,
+    "D": 3,
+    "E": 1,
+    "F": 3,
+    "G": 2,
+    "H": 2,
+}
+
+cost = {
+    "A": 25,
+    "B": 40,
+    "C": 55,
+    "D": 20,
+    "E": 10,
+    "F": 35,
+    "G": 30,
+    "H": 15,
+}
+
+medical_items = ["A", "B", "C"]
+food_items = ["D", "E"]
+fragile_items = ["A", "B", "F"]
+refrigerated_items = ["B", "C"]
+
+
+def solve_cargo_optimization(
+    max_weight=65,
+    max_volume=12,
+    max_cost=120,
+    min_medical=2,
+    min_food=1,
+    max_fragile=2,
+    max_refrigerated=2,
+    min_items=4,
+):
+    model = LpProblem("Humanitarian_Cargo_Optimization", LpMaximize)
+
+    x = LpVariable.dicts("Select", items, cat="Binary")
+
+    model += lpSum(utility[i] * x[i] for i in items)
+
+    model += lpSum(weight[i] * x[i] for i in items) <= max_weight
+    model += lpSum(volume[i] * x[i] for i in items) <= max_volume
+    model += lpSum(cost[i] * x[i] for i in items) <= max_cost
+
+    if min_medical > 0:
+        model += lpSum(x[i] for i in medical_items) >= min_medical
+
+    if min_food > 0:
+        model += lpSum(x[i] for i in food_items) >= min_food
+
+    if max_fragile is not None:
+        model += lpSum(x[i] for i in fragile_items) <= max_fragile
+
+    if max_refrigerated is not None:
+        model += lpSum(x[i] for i in refrigerated_items) <= max_refrigerated
+
+    if min_items > 0:
+        model += lpSum(x[i] for i in items) >= min_items
+
+    solver = PULP_CBC_CMD(msg=False)
+    model.solve(solver)
+
+    status = LpStatus[model.status]
+    selected_items = [i for i in items if x[i].varValue == 1]
+    total_weight = sum(weight[i] * x[i].varValue for i in items)
+    total_volume = sum(volume[i] * x[i].varValue for i in items)
+    total_cost = sum(cost[i] * x[i].varValue for i in items)
+    total_utility = value(model.objective)
+
+    return {
+        "status": status,
+        "selected_items": selected_items,
+        "total_weight": total_weight,
+        "total_volume": total_volume,
+        "total_cost": total_cost,
+        "total_utility": total_utility,
+    }
+
+
+def build_results_table(selected_items):
+    return [
+        {
+            "Item": item,
+            "Utility": utility[item],
+            "Weight": weight[item],
+            "Volume": volume[item],
+            "Cost": cost[item],
+            "Medical": item in medical_items,
+            "Food": item in food_items,
+            "Fragile": item in fragile_items,
+            "Refrigerated": item in refrigerated_items,
+        }
+        for item in selected_items
+    ]
+
+
+st.set_page_config(
+    page_title="Humanitarian Air Cargo Optimization",
+    page_icon="✈️",
+    layout="centered",
+)
+
+st.title("Humanitarian Air Cargo Optimization")
+st.write(
+    "Use this interactive model to choose the best combination of cargo items while respecting weight, volume, budget, and humanitarian constraints."
+)
+
+with st.sidebar.expander("Capacity & Budget Settings", expanded=True):
+    max_weight = st.number_input("Maximum weight capacity", min_value=1, value=65, step=1)
+    max_volume = st.number_input("Maximum volume capacity", min_value=1, value=12, step=1)
+    max_cost = st.number_input("Maximum budget", min_value=1, value=120, step=1)
+
+with st.sidebar.expander("Humanitarian Constraints", expanded=True):
+    min_medical = st.number_input("Minimum medical items", min_value=0, max_value=len(medical_items), value=2, step=1)
+    min_food = st.number_input("Minimum food items", min_value=0, max_value=len(food_items), value=1, step=1)
+    max_fragile = st.number_input("Maximum fragile items", min_value=0, max_value=len(fragile_items), value=2, step=1)
+    max_refrigerated = st.number_input("Maximum refrigerated items", min_value=0, max_value=len(refrigerated_items), value=2, step=1)
+    min_items = st.number_input("Minimum total items", min_value=0, max_value=len(items), value=4, step=1)
+
+if st.button("Run Optimization"):
+    results = solve_cargo_optimization(
+        max_weight=max_weight,
+        max_volume=max_volume,
+        max_cost=max_cost,
+        min_medical=min_medical,
+        min_food=min_food,
+        max_fragile=max_fragile,
+        max_refrigerated=max_refrigerated,
+        min_items=min_items,
+    )
+
+    st.subheader("Optimization Results")
+    st.write("**Status:**", results["status"])
+
+    if results["status"] == "Optimal":
+        st.metric("Maximum Utility", results["total_utility"])
+        st.metric("Total Weight", f"{results['total_weight']} / {max_weight}")
+        st.metric("Total Volume", f"{results['total_volume']} / {max_volume}")
+        st.metric("Total Cost", f"{results['total_cost']} / {max_cost}")
+
+        utilization_cols = st.columns(3)
+        utilization_cols[0].metric(
+            "Weight Utilization",
+            f"{(results['total_weight'] / max_weight) * 100:.1f}%",
+        )
+        utilization_cols[1].metric(
+            "Volume Utilization",
+            f"{(results['total_volume'] / max_volume) * 100:.1f}%",
+        )
+        utilization_cols[2].metric(
+            "Budget Utilization",
+            f"{(results['total_cost'] / max_cost) * 100:.1f}%",
+        )
+
+        st.write("### Selected Cargo Items")
+        st.table(build_results_table(results["selected_items"]))
+    else:
+        st.warning("No feasible solution found for the current constraints. Try relaxing capacity or requirement settings.")
+
+st.write("---")
+st.write("### Item Definitions")
+item_table = [
+    {
+        "Item": i,
+        "Utility": utility[i],
+        "Weight": weight[i],
+        "Volume": volume[i],
+        "Cost": cost[i],
+        "Medical": i in medical_items,
+        "Food": i in food_items,
+        "Fragile": i in fragile_items,
+        "Refrigerated": i in refrigerated_items,
+    }
+    for i in items
+]
+st.dataframe(item_table)
